@@ -1,0 +1,84 @@
+<script>
+    const socket = io();
+
+    let localStream;
+    let remoteStream;
+    let peerConnection;
+    const servers = {
+        iceServers: [
+            {
+                urls: 'stun:stun.l.google.com:19302'
+            }
+        ]
+    };
+
+    async function initiateCall() {
+        console.log("Initiating call...");
+        const constraints = {
+            audio: true,
+            video: false
+        };
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia(constraints);
+            console.log("Local stream obtained");
+
+            peerConnection = new RTCPeerConnection(servers);
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    console.log("Sending ICE candidate...");
+                    socket.emit('message', { 'candidate': event.candidate });
+                }
+            };
+            peerConnection.ontrack = (event) => {
+                console.log("Remote stream received");
+                remoteStream = event.streams[0];
+                document.getElementById('remoteAudio').srcObject = remoteStream;
+            };
+
+            localStream.getTracks().forEach(track => {
+                console.log("Adding track to peer connection");
+                peerConnection.addTrack(track, localStream);
+            });
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            console.log("Sending offer...");
+            socket.emit('message', { 'offer': offer });
+        } catch (error) {
+            console.error("Error initiating call:", error);
+        }
+    }
+
+    async function sendMessageToBot(message) {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message })
+        });
+        const data = await response.json();
+        console.log('Bot response:', data);
+        // Handle bot response (e.g., play audio response)
+    }
+
+    socket.on('message', async (message) => {
+        console.log("Message received:", message);
+        if (message.offer) {
+            console.log("Received offer, setting remote description and creating answer...");
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            console.log("Sending answer...");
+            socket.emit('message', { 'answer': answer });
+        } else if (message.answer) {
+            console.log("Received answer, setting remote description...");
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer));
+        } else if (message.candidate) {
+            console.log("Adding ICE candidate...");
+            await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+        } else if (message.chat) {
+            sendMessageToBot(message.chat);
+        }
+    });
+</script>
