@@ -12,12 +12,15 @@ def index():
 @app.route('/chat', methods=['POST'])
 def chat():
     message = request.json.get('message')
-    rasa_response = requests.post('http://localhost:5005/webhooks/rest/webhook', json={"message": message})
-    return jsonify(rasa_response.json())
+    response = requests.post('http://localhost:5005/webhooks/rest/webhook', json={"sender": "user", "message": message})
+    return jsonify(response.json())
 
 @socketio.on('message')
 def handle_message(message):
-    emit('message', message, broadcast=True)
+    response = requests.post('http://localhost:5005/webhooks/rest/webhook', json={"sender": "user", "message": message})
+    response_data = response.json()
+    if response_data:
+        emit('bot_response', response_data[0]['text'])
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, port=5001)

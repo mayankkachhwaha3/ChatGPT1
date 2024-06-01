@@ -3,125 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Sales Bot Demo</title>
+    <title>WebRTC Demo</title>
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 </head>
 <body>
-    <h1>AI Sales Bot Demo</h1>
-    <form id="callForm">
-        <label for="name">Name:</label>
-        <input type="text" id="name" name="name" required><br><br>
-        
-        <label for="phone">Phone Number (with international code):</label>
-        <input type="tel" id="phone" name="phone" required><br><br>
-        
-        <label for="additionalInfo">Additional Info:</label>
-        <input type="text" id="additionalInfo" name="additionalInfo" required><br><br>
-        
-        <label for="loanType">Loan Type:</label>
-        <select id="loanType" name="loanType">
-            <option value="personal">Personal Loan</option>
-            <option value="business">Business Loan</option>
-        </select><br><br>
-        
-        <button type="button" onclick="initiateCall()">Call Me Now</button>
-    </form>
-
-    <audio id="remoteAudio" controls></audio>
+    <h1>WebRTC Demo</h1>
+    <button onclick="startCall()">Start Call</button>
+    <audio id="remoteAudio" controls autoplay></audio>
 
     <script>
         const socket = io();
-
         let localStream;
-        let remoteStream;
         let peerConnection;
-        const servers = {
-            iceServers: [
-                {
-                    urls: 'stun:stun.l.google.com:19302'
-                }
-            ]
-        };
+        const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-        async function initiateCall() {
-            console.log("Initiating call...");
-            const constraints = {
-                audio: true,
-                video: false
-            };
+        async function startCall() {
+            console.log("Start Call button clicked");
             try {
-                localStream = await navigator.mediaDevices.getUserMedia(constraints);
-                console.log("Local stream obtained");
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                console.log("Local stream obtained:", localStream);
 
                 peerConnection = new RTCPeerConnection(servers);
+                console.log("Peer connection created:", peerConnection);
+
                 peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
-                        console.log("Sending ICE candidate...");
-                        socket.emit('message', { 'candidate': event.candidate });
+                        console.log("Sending ICE candidate:", event.candidate);
+                        socket.emit('ice-candidate', event.candidate);
                     }
                 };
+
                 peerConnection.ontrack = (event) => {
-                    console.log("Remote stream received");
-                    remoteStream = event.streams[0];
-                    document.getElementById('remoteAudio').srcObject = remoteStream;
+                    console.log("Remote stream received:", event.streams[0]);
+                    document.getElementById('remoteAudio').srcObject = event.streams[0];
                 };
 
                 localStream.getTracks().forEach(track => {
-                    console.log("Adding track to peer connection");
+                    console.log("Adding track to peer connection:", track);
                     peerConnection.addTrack(track, localStream);
                 });
 
                 const offer = await peerConnection.createOffer();
                 await peerConnection.setLocalDescription(offer);
-                console.log("Sending offer...");
-                socket.emit('message', { 'offer': offer });
+                console.log("Sending offer:", offer);
+                socket.emit('offer', offer);
+
+                // Start conversation
+                socket.emit('message', 'Hi, welcome to "Testing Voice Bot". How can I assist you today?');
             } catch (error) {
-                console.error("Error initiating call:", error);
+                console.error("Error starting call:", error);
             }
         }
 
-        async function sendMessageToBot(message) {
-            const response = await fetch('/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ message })
-            });
-            const data = await response.json();
-            console.log('Bot response:', data);
-            // Handle bot response (e.g., play audio response)
-        }
+        socket.on('bot_response', (response) => {
+            console.log("Received bot response:", response);
+            const msg = new SpeechSynthesisUtterance(response);
+            window.speechSynthesis.speak(msg);
+        });
 
-        socket.on('message', async (message) => {
-            console.log("Message received:", message);
+        socket.on('offer', async (offer) => {
+            console.log("Received offer:", offer);
             try {
-                if (message.offer) {
-                    if (peerConnection.signalingState !== 'stable') {
-                        console.error("Peer connection is not stable. State:", peerConnection.signalingState);
-                        return;
+                peerConnection = new RTCPeerConnection(servers);
+                console.log("Peer connection created:", peerConnection);
+
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        console.log("Sending ICE candidate:", event.candidate);
+                        socket.emit('ice-candidate', event.candidate);
                     }
-                    console.log("Received offer, setting remote description and creating answer...");
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    console.log("Sending answer...");
-                    socket.emit('message', { 'answer': answer });
-                } else if (message.answer) {
-                    if (peerConnection.signalingState !== 'have-local-offer') {
-                        console.error("Peer connection is not in the 'have-local-offer' state. State:", peerConnection.signalingState);
-                        return;
-                    }
-                    console.log("Received answer, setting remote description...");
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer));
-                } else if (message.candidate) {
-                    console.log("Adding ICE candidate...");
-                    await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
-                } else if (message.chat) {
-                    sendMessageToBot(message.chat);
-                }
+                };
+
+                peerConnection.ontrack = (event) => {
+                    console.log("Remote stream received:", event.streams[0]);
+                    document.getElementById('remoteAudio').srcObject = event.streams[0];
+                };
+
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                console.log("Remote description set with offer:", offer);
+
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                console.log("Sending answer:", answer);
+                socket.emit('answer', answer);
             } catch (error) {
-                console.error("Error handling message:", error);
+                console.error("Error receiving offer:", error);
+            }
+        });
+
+        socket.on('answer', async (answer) => {
+            console.log("Received answer:", answer);
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                console.log("Remote description set with answer:", answer);
+            } catch (error) {
+                console.error("Error setting remote description:", error);
+            }
+        });
+
+        socket.on('ice-candidate', async (candidate) => {
+            console.log("Received ICE candidate:", candidate);
+            try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                console.log("Added ICE candidate:", candidate);
+            } catch (error) {
+                console.error("Error adding ICE candidate:", error);
             }
         });
     </script>
